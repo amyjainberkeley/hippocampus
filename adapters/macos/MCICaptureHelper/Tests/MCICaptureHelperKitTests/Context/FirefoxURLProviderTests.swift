@@ -206,3 +206,37 @@ final class FirefoxURLProviderTests: XCTestCase {
         )
     }
 }
+
+// MARK: – The person's address switch
+
+/// The address switch, flipped by a test.
+private final class AddressSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on: Bool
+    init(_ on: Bool) { self.on = on }
+    var value: Bool {
+        get { lock.withLock { on } }
+        set { lock.withLock { on = newValue } }
+    }
+}
+
+extension FirefoxURLProviderTests {
+    /// A yes to macOS's Automation question (Resume's open-tab check,
+    /// setup's Safari settings) never turns address reading on: with the
+    /// person's switch off, no script runs, even where macOS allows it, and
+    /// an address read while it was on is not handed out after.
+    func testWithTheAddressSwitchOffNoScriptRuns() {
+        let runner = StubAppleScriptRunner(always: .success("https://example.com/"))
+        let clock = FakeClock()
+        let addresses = AddressSwitch(false)
+        let provider = FirefoxURLProvider(runner: runner, clock: clock.reader(), readsAddresses: { addresses.value })
+        XCTAssertNil(provider.activeTabURL(forFrontmost: "org.mozilla.firefox"))
+        XCTAssertEqual(runner.invocationCount, 0, "no script without the switch")
+        addresses.value = true
+        XCTAssertEqual(provider.activeTabURL(forFrontmost: "org.mozilla.firefox"), "https://example.com/")
+        XCTAssertEqual(runner.invocationCount, 1)
+        addresses.value = false
+        XCTAssertNil(provider.activeTabURL(forFrontmost: "org.mozilla.firefox"), "nothing from the cache once it's off")
+        XCTAssertEqual(runner.invocationCount, 1)
+    }
+}

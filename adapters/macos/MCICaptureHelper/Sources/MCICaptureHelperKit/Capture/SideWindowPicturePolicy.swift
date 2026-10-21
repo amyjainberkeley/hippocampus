@@ -43,10 +43,14 @@ public struct SideWindowPicturePolicy: Sendable, Equatable {
     // MARK: Rule 5 — calls and video
 
     /// Call apps (their text is still read; their windows are never pictured).
+    /// Chat apps with video calls are here too: a call can open in any of
+    /// their windows, and a picture of it would show other people's faces.
     static let callApps: Set<String> = [
         "us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2", "com.apple.FaceTime",
         "com.cisco.webexmeetingsapp", "com.webex.meetingmanager", "Cisco-Systems.Spark", "com.skype.skype",
         "app.tuple.app", "com.apple.PhotoBooth",
+        "com.hnc.Discord", "net.whatsapp.WhatsApp", "desktop.WhatsApp", "org.whispersystems.signal-desktop",
+        "ru.keepcoder.Telegram", "org.telegram.desktop",
     ]
 
     /// Video players.
@@ -59,7 +63,16 @@ public struct SideWindowPicturePolicy: Sendable, Equatable {
     static let callOrVideoTitles: [String] = [
         "google meet", "zoom meeting", "zoom webinar", "microsoft teams", "webex", "whereby", "huddle",
         "youtube", "netflix", "twitch", "vimeo", "prime video", "disney+", "hulu", "apple tv",
+        "hbo max", "paramount+", "tiktok",
     ]
+
+    /// Video sites and recorders named by an ordinary word, which counts only
+    /// as a whole word: "Loom", never "Bloomberg".
+    static let callOrVideoWords: Set<String> = ["loom", "peacock"]
+
+    /// Max, by the way its pages end their titles ("The Last of Us | Max"):
+    /// "max" alone is too common a word ("M3 Max").
+    static let callOrVideoEndings: [String] = ["| max", "- max", "\u{2013} max"]
 
     /// Rule 5: a call app or video player, or a window whose title names a
     /// call page, a huddle or a video site. A Google Meet room's title is
@@ -68,7 +81,10 @@ public struct SideWindowPicturePolicy: Sendable, Equatable {
         if let bundleId, callApps.contains(bundleId) || videoApps.contains(bundleId) { return true }
         guard let title = title?.lowercased(), !title.isEmpty else { return false }
         if title.hasPrefix("meet - ") || title.hasPrefix("meet \u{2013} ") || title == "meet" { return true }
-        return callOrVideoTitles.contains { title.contains($0) }
+        if callOrVideoTitles.contains(where: { title.contains($0) }) { return true }
+        if callOrVideoEndings.contains(where: { title.hasSuffix($0) }) || title == "max" { return true }
+        let words = title.split { !$0.isLetter && !$0.isNumber }
+        return words.contains { callOrVideoWords.contains(String($0)) }
     }
 }
 

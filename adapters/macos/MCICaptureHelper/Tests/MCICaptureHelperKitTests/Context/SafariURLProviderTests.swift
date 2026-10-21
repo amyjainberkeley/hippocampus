@@ -391,3 +391,49 @@ final class SafariURLProviderTests: XCTestCase {
         XCTAssertEqual(SafariURLProvider.timeoutMs, 250)
     }
 }
+
+// MARK: – The person's address switch
+
+/// The address switch, flipped by a test.
+private final class AddressSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on: Bool
+    init(_ on: Bool) { self.on = on }
+    var value: Bool {
+        get { lock.withLock { on } }
+        set { lock.withLock { on = newValue } }
+    }
+}
+
+extension SafariURLProviderTests {
+    /// A yes to macOS's Automation question (Resume's open-tab check,
+    /// setup's Safari settings) never turns address reading on: with the
+    /// person's switch off, no script runs, even where macOS allows it, and
+    /// an address read while it was on is not handed out after.
+    func testWithTheAddressSwitchOffNoScriptRuns() {
+        let runner = StubAppleScriptRunner(always: .success("https://example.com/"))
+        let clock = FakeClock()
+        let addresses = AddressSwitch(false)
+        let provider = SafariURLProvider(runner: runner, clock: clock.reader(), readsAddresses: { addresses.value })
+        XCTAssertNil(provider.activeTabURL(forFrontmost: "com.apple.Safari"))
+        XCTAssertEqual(runner.invocationCount, 0, "no script without the switch")
+        addresses.value = true
+        XCTAssertEqual(provider.activeTabURL(forFrontmost: "com.apple.Safari"), "https://example.com/")
+        XCTAssertEqual(runner.invocationCount, 1)
+        addresses.value = false
+        XCTAssertNil(provider.activeTabURL(forFrontmost: "com.apple.Safari"), "nothing from the cache once it's off")
+        XCTAssertEqual(runner.invocationCount, 1)
+    }
+
+    /// The switch is off unless the person set it: unset, or anything but
+    /// `true`, is off, so an update changes nothing until they turn it on.
+    func testTheAddressSwitchIsOffUnlessSet() {
+        XCTAssertEqual(AutomationConsent.addressReadingKey, "ai.hippocampus.browser.readAddressesWithAutomation")
+        XCTAssertFalse(AutomationConsent.readsAddresses(stored: nil))
+        XCTAssertFalse(AutomationConsent.readsAddresses(stored: false))
+        XCTAssertFalse(AutomationConsent.readsAddresses(stored: "true"))
+        XCTAssertFalse(AutomationConsent.readsAddresses(stored: "YES"))
+        XCTAssertTrue(AutomationConsent.readsAddresses(stored: true))
+        XCTAssertTrue(AutomationConsent.readsAddresses(stored: NSNumber(value: true)))
+    }
+}

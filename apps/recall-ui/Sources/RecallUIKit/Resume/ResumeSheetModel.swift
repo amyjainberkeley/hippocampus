@@ -18,13 +18,33 @@ public protocol ResumeWorkspace: Sendable {
 }
 
 /// The addresses open in a browser's tabs, so Resume never opens one twice
-/// where it can tell (SPEC-DELTA 3): AppleScript for Safari and the Chrome
-/// family. The addresses are compared in memory and never kept.
+/// where it can tell (SPEC-DELTA 3): AppleScript for the Chrome family and
+/// Arc. The addresses are compared in memory and never kept.
 public protocol OpenTabsReading: Sendable {
-    /// The addresses open in `browser` (a bundle id); empty when it isn't
-    /// running; nil when it can't tell (not allowed, or no way to ask).
-    /// `mayAsk`: macOS may ask the person for Automation now.
-    func openTabs(browser: String, mayAsk: Bool) async -> [String]?
+    /// The addresses open in `browser` (a bundle id), and whether macOS was
+    /// asked. `mayAsk`: macOS may ask the person for Automation now.
+    func openTabs(browser: String, mayAsk: Bool) async -> OpenTabsAnswer
+}
+
+/// What a browser said about its open tabs.
+public struct OpenTabsAnswer: Equatable, Sendable {
+    /// The addresses open in its normal windows: empty when it isn't
+    /// running; nil when Hippocampus can't tell (not allowed, or no way to
+    /// ask).
+    public var addresses: [String]?
+    /// Whether macOS was asked about Automation for it this time. A browser
+    /// that isn't running can't be asked about, so its one question waits.
+    public var asked: Bool
+
+    public init(addresses: [String]?, asked: Bool = false) {
+        self.addresses = addresses
+        self.asked = asked
+    }
+
+    /// Not running: no tabs, and nothing asked.
+    public static let notRunning = OpenTabsAnswer(addresses: [])
+    /// No way to tell, and nothing asked.
+    public static let unknown = OpenTabsAnswer(addresses: nil)
 }
 
 /// What Resume never offers, whatever the plan says: the apps and sites
@@ -32,11 +52,16 @@ public protocol OpenTabsReading: Sendable {
 public struct ResumeRules: Sendable {
     public let isNeverReadApp: @Sendable (String) -> Bool
     public let isNeverReadSite: @Sendable (String) -> Bool
+    /// A title the never-read list names by a part of it, as Ask {Tool}
+    /// leaves it out: a page or document remembered before the rule.
+    public let isNeverReadTitle: @Sendable (String) -> Bool
 
     public init(isNeverReadApp: @escaping @Sendable (String) -> Bool,
-                isNeverReadSite: @escaping @Sendable (String) -> Bool) {
+                isNeverReadSite: @escaping @Sendable (String) -> Bool,
+                isNeverReadTitle: @escaping @Sendable (String) -> Bool = { _ in false }) {
         self.isNeverReadApp = isNeverReadApp
         self.isNeverReadSite = isNeverReadSite
+        self.isNeverReadTitle = isNeverReadTitle
     }
 
     /// No rules: what tests and renders use.
@@ -139,6 +164,7 @@ public final class ResumeSheetModel: ObservableObject {
         plan.items.compactMap { target -> ResumeRow? in
             if let app = target.app, rules.isNeverReadApp(app) { return nil }
             if let url = target.url, rules.isNeverReadSite(url) { return nil }
+            if rules.isNeverReadTitle(target.title) { return nil }
             let name = target.app.map(appName) ?? ""
             let group = Self.group(of: target)
             var blocked: String?
@@ -307,14 +333,16 @@ public final class ResumeSheetModel: ObservableObject {
 
     /// The addresses open in a browser now, compared without scheme, "www.",
     /// query, fragment or a closing slash. macOS may ask for Automation only
-    /// the first time Resume opens tabs in that browser; after that, a
-    /// browser Hippocampus may not ask simply opens them again.
+    /// the first time Resume opens tabs in that browser while it is running;
+    /// after that, a browser Hippocampus may not ask simply opens them again.
     private func openAddresses(in browser: String) async -> Set<String>? {
         let key = "resume.automation.asked.\(browser)"
         let mayAsk = asked.map { $0.data(forKey: key) == nil } ?? false
-        let open = await tabs.openTabs(browser: browser, mayAsk: mayAsk)
-        if mayAsk { asked?.set(Data([1]), forKey: key) }
-        return open.map { Set($0.map(Self.comparable)) }
+        let answer = await tabs.openTabs(browser: browser, mayAsk: mayAsk)
+        // Only a question macOS really asked uses it up: with the browser
+        // closed there was nothing to ask, so the next Resume still may.
+        if mayAsk, answer.asked { asked?.set(Data([1]), forKey: key) }
+        return answer.addresses.map { Set($0.map(Self.comparable)) }
     }
 
     /// An address as tabs are compared: host and path, lower-case host.

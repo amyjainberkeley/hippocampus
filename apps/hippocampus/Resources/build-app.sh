@@ -353,6 +353,7 @@ trap 'rm -rf "$SIGNING_SCRATCH"' EXIT
 ENTITLEMENTS_SOURCE="$SCRIPT_DIR/Hippocampus.entitlements"
 ENTITLEMENTS="$SIGNING_SCRATCH/Hippocampus.entitlements"
 CAPTURE_HELPER_ENTITLEMENTS="$SCRIPT_DIR/MCICaptureHelper.entitlements"
+RECALL_UI_ENTITLEMENTS="$SCRIPT_DIR/RecallUI.entitlements"
 hippocampus_render_app_group_entitlements \
     "$ENTITLEMENTS_SOURCE" "$ENTITLEMENTS" "$APP_GROUP_ID"
 
@@ -870,9 +871,12 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
         --sign "$DEVELOPER_ID" \
         "$MACOS/mci-agent"
 
+    # The window asks macOS itself for Resume's open-tab check and Today's
+    # Show Calendar, so it carries those two keys and nothing else.
     if [[ -f "$MACOS/recall-ui" ]]; then
         codesign --force --options=runtime --timestamp \
             --sign "$DEVELOPER_ID" \
+            --entitlements "$RECALL_UI_ENTITLEMENTS" \
             "$MACOS/recall-ui"
     fi
 
@@ -979,7 +983,7 @@ else
         --entitlements "$CAPTURE_HELPER_ENTITLEMENTS" \
         "$MACOS/MCICaptureHelper"
     codesign --force --sign - "$MACOS/mci-agent"
-    [[ -f "$MACOS/recall-ui" ]] && codesign --force --sign - "$MACOS/recall-ui"
+    [[ -f "$MACOS/recall-ui" ]] && codesign --force --sign - --entitlements "$RECALL_UI_ENTITLEMENTS" "$MACOS/recall-ui"
     [[ -f "$MACOS/onboarding" ]] && codesign --force --sign - "$MACOS/onboarding"
     [[ -f "$MACOS/hippocampus-native-host" ]] && codesign --force --sign - "$MACOS/hippocampus-native-host"
     [[ -f "$MACOS/hippocampus-mind" ]] && codesign --force --sign - "$MACOS/hippocampus-mind"

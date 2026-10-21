@@ -133,125 +133,52 @@ final class CalendarAttributionTests: XCTestCase {
     }
 
     // ------------------------------------------------------------------
-    // Lazy construction and authorization, using no EventKit store
+    // The helper reads no calendar and makes no store
     // ------------------------------------------------------------------
 
-    func testConstructionAndUnauthorizedReadsNeverCreateStore() {
-        let factory = CalendarStoreFactorySpy()
-        let attribution = CalendarAttribution(storeFactory: factory.makeStore)
-        XCTAssertEqual(factory.calls, 0)
-        XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: 100)))
-        XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: 200)))
-        XCTAssertEqual(factory.calls, 0)
-        XCTAssertEqual(factory.store.requests, 0)
-        XCTAssertTrue(factory.store.readDates.isEmpty)
-    }
-
-    func testExplicitStartRequestsAccessAndPendingOrDeniedAccessCannotRead() {
-        let factory = CalendarStoreFactorySpy()
-        let attribution = CalendarAttribution(storeFactory: factory.makeStore)
+    /// Nothing reads `WorkflowContext.currentCalendarEvent` or sends it, so
+    /// the helper's own source reads nothing: starting it, and every tick
+    /// with it, give no event, with the calendar on or off.
+    func testTheHelpersCalendarSourceReadsNothing() async {
+        let attribution = CalendarAttribution()
         attribution.start()
-        XCTAssertEqual(factory.calls, 1)
-        XCTAssertEqual(factory.store.requests, 1)
-        XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: 100)))
-        XCTAssertTrue(factory.store.readDates.isEmpty)
-        factory.store.completeAccess(granted: false)
-        XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: 100)))
-        XCTAssertTrue(factory.store.readDates.isEmpty)
-        XCTAssertEqual(factory.calls, 1)
-    }
-
-    func testGrantedAccessReadsExactDateAndPreservesCacheTTL() {
-        let factory = CalendarStoreFactorySpy()
-        let attribution = CalendarAttribution(cacheTtl: 30, storeFactory: factory.makeStore)
         attribution.start()
-        factory.store.completeAccess(granted: true)
-        let now = Date(timeIntervalSince1970: 100)
-        XCTAssertEqual(attribution.eventNow(at: now), factory.store.event)
-        XCTAssertEqual(attribution.eventNow(at: now.addingTimeInterval(1)), factory.store.event)
-        XCTAssertEqual(factory.store.readDates, [now])
-        XCTAssertEqual(attribution.eventNow(at: now.addingTimeInterval(31)), factory.store.event)
-        XCTAssertEqual(factory.store.readDates, [now, now.addingTimeInterval(31)])
-        XCTAssertEqual(factory.calls, 1)
+        for seconds in [0.0, 100, 1_716_900_000] {
+            XCTAssertNil(attribution.eventNow(at: Date(timeIntervalSince1970: seconds)))
+        }
+        let store = WorkflowContextSnapshot()
+        await NSWorkspaceContextProvider.tickOnce(
+            source: StubFrontmostAppSource(initial: "com.apple.Safari"),
+            titleProvider: nil,
+            calendarSource: attribution,
+            nowPlayingSource: nil,
+            contactsSource: nil,
+            store: store
+        )
+        XCTAssertEqual(store.currentSync().appBundleId, "com.apple.Safari")
+        XCTAssertNil(store.currentSync().currentCalendarEvent)
     }
 
-    func testWithTheCalendarTurnedOffNothingIsReadEvenWhenMacOSAllowsIt() {
-        let factory = CalendarStoreFactorySpy()
-        let switchOn = LockedFlag(false)
-        let attribution = CalendarAttribution(cacheTtl: 30, storeFactory: factory.makeStore,
-                                              isTurnedOn: { switchOn.value })
-        attribution.start()
-        factory.store.completeAccess(granted: true)
-        let now = Date(timeIntervalSince1970: 100)
-        XCTAssertNil(attribution.eventNow(at: now))
-        XCTAssertTrue(factory.store.readDates.isEmpty, "off means not read (SPEC-DELTA 5)")
-        switchOn.value = true
-        XCTAssertEqual(attribution.eventNow(at: now), factory.store.event)
-        XCTAssertEqual(factory.store.readDates, [now])
-        switchOn.value = false
-        XCTAssertNil(attribution.eventNow(at: now.addingTimeInterval(1)), "turning it off drops what was read")
-        XCTAssertEqual(factory.store.readDates, [now])
-    }
-
-    func testTheSwitchIsTheAppsOwnDefaultsKeyAndUnsetIsOff() {
-        XCTAssertEqual(CalendarAttribution.settingKey, "ai.hippocampus.calendar.show")
-        XCTAssertFalse(CalendarAttribution.isTurnedOn(stored: nil))
-        XCTAssertFalse(CalendarAttribution.isTurnedOn(stored: false))
-        XCTAssertFalse(CalendarAttribution.isTurnedOn(stored: "true"))
-        XCTAssertTrue(CalendarAttribution.isTurnedOn(stored: true))
-    }
-
-    func testRepeatedExplicitStartsReuseOneStoreAndPreserveAccessRequests() {
-        let factory = CalendarStoreFactorySpy()
-        let attribution = CalendarAttribution(storeFactory: factory.makeStore)
-        DispatchQueue.concurrentPerform(iterations: 8) { _ in attribution.start() }
-        XCTAssertEqual(factory.calls, 1)
-        XCTAssertEqual(factory.store.requests, 8)
-        XCTAssertTrue(factory.store.readDates.isEmpty)
-    }
-}
-
-private final class CalendarStoreFactorySpy: @unchecked Sendable {
-    let store = FakeCalendarStore()
-    private let lock = NSLock()
-    private var creations = 0
-    var calls: Int { lock.withLock { creations } }
-
-    func makeStore() -> any CalendarAttributionStore {
-        lock.withLock { creations += 1 }
-        return store
-    }
-}
-
-private final class FakeCalendarStore: CalendarAttributionStore, @unchecked Sendable {
-    let event = CalendarEventRef(subject: "Synthetic meeting", startUnixSeconds: 90, endUnixSeconds: 200)
-    private let lock = NSLock()
-    private var callbacks: [@Sendable (Bool) -> Void] = []
-    private var observedDates: [Date] = []
-    var requests: Int { lock.withLock { callbacks.count } }
-    var readDates: [Date] { lock.withLock { observedDates } }
-
-    func requestAccess(completion: @escaping @Sendable (Bool) -> Void) {
-        lock.withLock { callbacks.append(completion) }
-    }
-
-    func completeAccess(granted: Bool) {
-        let callback = lock.withLock { callbacks.last }
-        callback?(granted)
-    }
-
-    func eventNow(at now: Date) -> CalendarEventRef? {
-        lock.withLock { observedDates.append(now) }
-        return event
-    }
-}
-
-private final class LockedFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var flag: Bool
-    init(_ flag: Bool) { self.flag = flag }
-    var value: Bool {
-        get { lock.withLock { flag } }
-        set { lock.withLock { flag = newValue } }
+    /// No `EKEventStore` is made anywhere in the capture helper, at launch
+    /// or later, while the calendar is off or on: making one can start the
+    /// calendar's services, and the helper has nothing to read with it. The
+    /// calendar is the window's, read only while the person has it on.
+    func testTheCaptureHelperNeverMakesACalendarStore() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let sources = root.appendingPathComponent("Sources")
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
+        XCTAssertGreaterThan(files.count, 50, "the package's sources were found")
+        for file in files {
+            // The code without comments, so prose that names an API is not a call.
+            let code = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n").map { line in
+                line.range(of: "//").map { String(line[..<$0.lowerBound]) } ?? line
+            }.joined(separator: "\n")
+            for call in ["EKEventStore", "import EventKit", "requestFullAccessToEvents", "predicateForEvents",
+                         "authorizationStatus(for: .event"] {
+                XCTAssertFalse(code.contains(call), "\(file.lastPathComponent) reads the calendar: \(call)")
+            }
+        }
     }
 }

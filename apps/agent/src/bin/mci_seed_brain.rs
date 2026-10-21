@@ -1204,6 +1204,14 @@ fn demo_week_main(args: &Args) -> ExitCode {
         errln!("mci-seed-brain: write {}: {e}", calendar.display());
         return ExitCode::from(17);
     }
+    // The project's empty folder, where the week's Terminal shows it, so
+    // Resume finds a folder to reopen. Without it Resume says it can't find
+    // the folder, and the week is still whole.
+    if let Some(home) = std::env::var_os("HOME") {
+        if let Err(e) = demo_week::make_project_folder(&folder, std::path::Path::new(&home)) {
+            errln!("mci-seed-brain: the project's folder: {e}");
+        }
+    }
     outln!(
         "{}",
         serde_json::json!({

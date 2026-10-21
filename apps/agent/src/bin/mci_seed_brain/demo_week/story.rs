@@ -38,7 +38,21 @@ const OWEN: &str = "Owen Pryce";
 pub const PEOPLE: [&str; 8] = [FOUNDER, IRIS, THEO, NADIA, MALIK, JOY, MIRA, OWEN];
 
 const PROJECT: &str = "pebblewick-app";
+/// The project's folder, as yesterday's Terminal window titles show it
+/// (that window set to show the path): an empty folder Demo Memory makes
+/// inside its own folder ([`super::make_project_folder`]), so Resume finds a
+/// folder to reopen, and it goes when the week does. `~` is whoever's Mac
+/// this is. Today's windows show Terminal's default title, so the take's
+/// pictures don't carry the path.
+pub const PROJECT_FOLDER: &str =
+    "~/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app";
 const PROMPT: &str = "ren@studio pebblewick-app % ";
+/// The lines of code the editor's drawing has room for, at 1440 by 900.
+const EDITOR_LINES: usize = 36;
+/// The week is today and the six days before it; the memory also holds the
+/// days before that, back to this many days ago, lighter, with last week's
+/// project in them.
+pub const OLDEST_DAY_BACK: u64 = 10;
 const Q4_DOC: &str = "https://docs.google.com/document/d/1pW4q-investor-update-oct/edit";
 const BUDGET_SHEET: &str = "https://docs.google.com/spreadsheets/d/1pW27-budget-plan/edit";
 
@@ -896,7 +910,24 @@ impl Story {
 
     // -- Code ------------------------------------------------------------------
 
-    fn editor(file: &str, lines: &[&str], cursor: usize, caption: Option<&str>) -> Win {
+    /// VS Code with `file` open, scrolled so line `first` (from 1) is at the
+    /// top: the lines that fit are what the window says, the cursor is on
+    /// line `cursor` of the file, and each place in a file (`place`) has its
+    /// own screenshot.
+    fn editor(
+        file: &str,
+        lines: &[&str],
+        first: usize,
+        cursor: usize,
+        caption: &str,
+        place: Option<&str>,
+    ) -> Win {
+        let shown: Vec<&str> = lines
+            .iter()
+            .skip(first.saturating_sub(1))
+            .take(EDITOR_LINES)
+            .copied()
+            .collect();
         let tree = [
             "\u{25BE} src",
             "billing.ts",
@@ -923,16 +954,16 @@ impl Story {
             tabs.join("\n"),
             tree.join("\n")
         );
+        let id = format!("code-{}", file.replace('.', "-"));
         Win {
             app: CODE,
             title: format!("{file} \u{2014} {PROJECT}"),
             url: None,
-            main: lines.join("\n"),
+            main: shown.join("\n"),
             rest,
-            caption: caption
-                .map_or_else(|| format!("Working on {file} in {PROJECT}"), str::to_owned),
+            caption: caption.to_owned(),
             screen: Some(Screen {
-                id: format!("code-{}", file.replace('.', "-")),
+                id: place.map_or_else(|| id.clone(), |place| format!("{id}-{place}")),
                 template: "editor",
                 meta: json!({
                     "project": PROJECT,
@@ -941,6 +972,7 @@ impl Story {
                     "active_tab": active,
                     "tree": tree,
                     "language": "TypeScript",
+                    "first_line": first,
                     "cursor_line": cursor,
                     "branch": "annual-billing",
                 }),
@@ -948,43 +980,99 @@ impl Story {
         }
     }
 
+    /// `billing.ts`, all of it: longer than the window, so where it is
+    /// scrolled shows in what each moment reads.
+    const BILLING_TS: [&'static str; 55] = [
+        "import Stripe from \"stripe\";",
+        "import { plans, type PlanId } from \"./plans\";",
+        "import { findSubscription, type Studio } from \"./subscriptions\";",
+        "",
+        "const stripe = new Stripe(process.env.STRIPE_KEY ?? \"\");",
+        "const DAY = 24 * 60 * 60;",
+        "",
+        "// Moves a studio to yearly billing and credits the unused part of the month.",
+        "export async function switchToYearly(studioId: string, plan: PlanId) {",
+        "  const subscription = await findSubscription(studioId);",
+        "  const item = subscription.items.data[0];",
+        "  return stripe.subscriptions.update(subscription.id, {",
+        "    items: [{ id: item.id, price: plans[plan].yearlyPrice }],",
+        "    billing_cycle_anchor: \"now\",",
+        "    proration_behavior: \"always_invoice\",",
+        "  });",
+        "}",
+        "",
+        "// The credit for the days left this month, in cents.",
+        "export function creditForUnusedDays(monthlyCents: number, periodEnd: number, now: number) {",
+        "  const daysLeft = Math.floor((periodEnd - now) / DAY);",
+        "  return Math.round((monthlyCents * daysLeft) / 30);",
+        "}",
+        "",
+        "// What the studio pays today: the yearly price, less the days left this month.",
+        "export async function previewYearly(studio: Studio, plan: PlanId) {",
+        "  const upcoming = await stripe.invoices.retrieveUpcoming({",
+        "    customer: studio.customerId,",
+        "    subscription: studio.subscriptionId,",
+        "    subscription_items: [{ price: plans[plan].yearlyPrice }],",
+        "    subscription_billing_cycle_anchor: \"now\",",
+        "  });",
+        "  return {",
+        "    credit: upcoming.lines.data.filter((line) => line.amount < 0),",
+        "    total: upcoming.amount_due,",
+        "  };",
+        "}",
+        "",
+        "// Back to monthly when the year ends, never in the middle of it.",
+        "export async function switchToMonthly(studioId: string, plan: PlanId) {",
+        "  const subscription = await findSubscription(studioId);",
+        "  const item = subscription.items.data[0];",
+        "  return stripe.subscriptions.update(subscription.id, {",
+        "    items: [{ id: item.id, price: plans[plan].monthlyPrice }],",
+        "    billing_cycle_anchor: \"unchanged\",",
+        "    proration_behavior: \"none\",",
+        "  });",
+        "}",
+        "",
+        "// A studio's plan, as the billing page shows it.",
+        "export async function currentPlan(studioId: string) {",
+        "  const subscription = await findSubscription(studioId);",
+        "  const price = subscription.items.data[0].price;",
+        "  return { plan: price.lookup_key, yearly: price.recurring?.interval === \"year\" };",
+        "}",
+    ];
+
+    /// `billing.ts` at the top: the switch to yearly billing.
     fn billing_ts() -> Win {
         Self::editor(
             "billing.ts",
-            &[
-                "import Stripe from \"stripe\";",
-                "import { plans, type PlanId } from \"./plans\";",
-                "import { findSubscription, type Studio } from \"./subscriptions\";",
-                "",
-                "const stripe = new Stripe(process.env.STRIPE_KEY ?? \"\");",
-                "",
-                "// Moves a studio to yearly billing and credits the unused part of the month.",
-                "export async function switchToYearly(studioId: string, plan: PlanId) {",
-                "  const subscription = await findSubscription(studioId);",
-                "  const item = subscription.items.data[0];",
-                "  return stripe.subscriptions.update(subscription.id, {",
-                "    items: [{ id: item.id, price: plans[plan].yearlyPrice }],",
-                "    billing_cycle_anchor: \"now\",",
-                "    proration_behavior: \"always_invoice\",",
-                "  });",
-                "}",
-                "",
-                "// What the studio pays today: the yearly price, less the days left this month.",
-                "export async function previewYearly(studio: Studio, plan: PlanId) {",
-                "  const upcoming = await stripe.invoices.retrieveUpcoming({",
-                "    customer: studio.customerId,",
-                "    subscription: studio.subscriptionId,",
-                "    subscription_items: [{ price: plans[plan].yearlyPrice }],",
-                "    subscription_billing_cycle_anchor: \"now\",",
-                "  });",
-                "  return {",
-                "    credit: upcoming.lines.data.filter((line) => line.amount < 0),",
-                "    total: upcoming.amount_due,",
-                "  };",
-                "}",
-            ],
+            &Self::BILLING_TS,
+            1,
             14,
+            "Switching studios to yearly billing in billing.ts",
             None,
+        )
+    }
+
+    /// `billing.ts` scrolled to the credit for unused days.
+    fn billing_ts_credit() -> Win {
+        Self::editor(
+            "billing.ts",
+            &Self::BILLING_TS,
+            19,
+            21,
+            "Working out the credit for unused days in billing.ts",
+            Some("credit"),
+        )
+    }
+
+    /// `billing.ts` scrolled to what a studio pays today.
+    fn billing_ts_preview() -> Win {
+        Self::editor(
+            "billing.ts",
+            &Self::BILLING_TS,
+            25,
+            31,
+            "Previewing what a studio pays today in billing.ts",
+            Some("preview"),
         )
     }
 
@@ -1022,7 +1110,9 @@ impl Story {
                 "  });",
                 "});",
             ],
+            1,
             9,
+            "Writing tests for yearly billing in billing.test.ts",
             None,
         )
     }
@@ -1059,7 +1149,9 @@ impl Story {
                 "  },",
                 "};",
             ],
+            1,
             19,
+            "Adding the yearly price to the Studio plan in plans.ts",
             None,
         )
     }
@@ -1089,15 +1181,20 @@ impl Story {
                 "  await markPaid(invoice.subscription as string, { graceDays: 7 });",
                 "}",
             ],
+            1,
             9,
+            "Working on the webhook handler in webhooks.ts",
             None,
         )
     }
 
-    fn terminal(lines: &[String], screen_id: &str) -> Win {
+    /// A Terminal window in the project: its title is the project's name,
+    /// as Terminal shows it by default, or its whole path (`shows_path`).
+    fn terminal(lines: &[String], screen_id: &str, shows_path: bool) -> Win {
+        let folder = if shows_path { PROJECT_FOLDER } else { PROJECT };
         Win {
             app: TERMINAL,
-            title: format!("{PROJECT} \u{2014} -zsh \u{2014} 160\u{00D7}40"),
+            title: format!("{folder} \u{2014} -zsh \u{2014} 160\u{00D7}40"),
             url: None,
             main: lines.join("\n"),
             rest: String::new(),
@@ -1115,10 +1212,10 @@ impl Story {
         let mut lines = vec![
             format!("{PROMPT}pnpm test billing"),
             String::new(),
-            "> pebblewick-app@2.3.0 test /Users/ren/dev/pebblewick-app".to_owned(),
+            "> pebblewick-app@2.3.0 test".to_owned(),
             "> vitest run billing".to_owned(),
             String::new(),
-            " RUN  v2.1.4 /Users/ren/dev/pebblewick-app".to_owned(),
+            " RUN  v2.1.4".to_owned(),
             String::new(),
         ];
         if failing {
@@ -1162,11 +1259,11 @@ impl Story {
     }
 
     fn tests_first_run() -> Win {
-        Self::terminal(&Self::test_run(true), "terminal-tests-first")
+        Self::terminal(&Self::test_run(true), "terminal-tests-first", false)
     }
 
     fn tests_passing() -> Win {
-        Self::terminal(&Self::test_run(false), "terminal-tests-passing")
+        Self::terminal(&Self::test_run(false), "terminal-tests-passing", false)
     }
 
     fn tests_pushed() -> Win {
@@ -1187,7 +1284,7 @@ impl Story {
             "branch 'annual-billing' set up to track 'origin/annual-billing'.".to_owned(),
             PROMPT.trim_end().to_owned(),
         ]);
-        Self::terminal(&lines, "terminal-pushed")
+        Self::terminal(&lines, "terminal-pushed", false)
     }
 
     fn tests_webhooks() -> Win {
@@ -1198,7 +1295,7 @@ impl Story {
             "e80a6c4 Add waitlists".to_owned(),
             format!("{PROMPT}pnpm test webhooks"),
             String::new(),
-            " RUN  v2.1.4 /Users/ren/dev/pebblewick-app".to_owned(),
+            " RUN  v2.1.4".to_owned(),
             String::new(),
             " \u{2713} src/webhooks.test.ts (3 tests) 22ms".to_owned(),
             "   \u{2713} onInvoicePaid > sends one receipt when Stripe retries".to_owned(),
@@ -1210,7 +1307,7 @@ impl Story {
             String::new(),
             PROMPT.trim_end().to_owned(),
         ];
-        Self::terminal(&lines, "terminal-webhooks")
+        Self::terminal(&lines, "terminal-webhooks", true)
     }
 
     // -- Notion, Figma, Calendar ----------------------------------------------
@@ -1220,6 +1317,7 @@ impl Story {
             "Product",
             "October changelog",
             "Hiring plan",
+            "Waitlist launch plan",
             "Roadmap",
             "Support playbook",
         ];
@@ -1267,6 +1365,30 @@ impl Story {
             &blocks,
             "Writing \u{201C}October changelog\u{201D}",
             &format!("notion-changelog-{stage}"),
+        )
+    }
+
+    /// Last week's project: the plan for launching waitlists, which the
+    /// October changelog now announces.
+    fn waitlist_plan() -> Win {
+        let blocks = vec![
+            h1("Waitlist launch plan"),
+            p("Waitlists go to every studio on the 1st. When a spot opens, the next person gets a text and has an hour to take it."),
+            h2("Before launch"),
+            li("Turn waitlists on for the ten studios in the beta."),
+            li("Write the help article and the changelog post."),
+            li("Check reminder texts in every time zone we serve."),
+            h2("Launch day"),
+            li("Turn waitlists on for everyone at 9 AM."),
+            li("Joy watches support. Malik watches the texts."),
+            h2("After"),
+            p("Count the spots waitlists fill in the first two weeks."),
+        ];
+        Self::notion(
+            "Waitlist launch plan",
+            &blocks,
+            "Writing \u{201C}Waitlist launch plan\u{201D}",
+            "notion-waitlists",
         )
     }
 
@@ -1533,7 +1655,7 @@ impl Story {
                 .hold(1, |_| Self::search_proration())
                 .hold(9, |_| Self::stripe_docs())
                 .hold(8, |_| Self::claude_proration())
-                .hold(8, |_| Self::billing_ts())
+                .hold(8, |_| Self::billing_ts_credit())
                 .note("Prorating yearly upgrades", "You read how Stripe prorates a change partway through a month and asked Claude how to credit the unused days.", "You settled on crediting the unused part of the month and invoicing right away."),
             self.session(0, 11, 44)
                 .hold(24, |_| self.q4_update(1))
@@ -1554,7 +1676,7 @@ impl Story {
                 .note("Wiring up the Studio plan", "You connected the new yearly price to billing.ts and ran the billing tests. One failed on the credit for unused days.", "Nothing notable."),
             self.session(0, 14, 29)
                 .hold(10, |_| Self::billing_test_ts())
-                .hold(10, |_| Self::billing_ts())
+                .hold(10, |_| Self::billing_ts_credit())
                 .hold(9, |_| Self::tests_passing())
                 .note("Fixing the credit for unused days", "You fixed the credit for the unused part of the month and got the billing tests passing.", "You counted the days left instead of the days used."),
             self.session(0, 15, 2)
@@ -1572,7 +1694,7 @@ impl Story {
                 .hold(22, |_| Self::changelog(1))
                 .note("October changelog", "You wrote the yearly billing part of the October changelog.", "Nothing notable."),
             self.session(0, 17, 0)
-                .hold(10, |_| Self::billing_ts())
+                .hold(10, |_| Self::billing_ts_preview())
                 .hold(6, |_| Self::tests_pushed())
                 .hold(4, |at| self.slack("team", 0, at))
                 .note("Shipping yearly billing", "You pushed the yearly billing change and asked Iris to review it.", "Nothing notable."),
@@ -1721,6 +1843,22 @@ impl Story {
         };
         sessions.sort_by_key(|s| s.start_us);
         sessions
+    }
+
+    /// The days before the week: last week's waitlist launch, planned on
+    /// weekdays, so Working On has an item from before this week.
+    fn older(&self, back: u64) -> Vec<Session> {
+        if self.local(self.at(back, 12, 0)).is_weekend() {
+            return Vec::new();
+        }
+        vec![self
+            .session(back, 9, 40)
+            .hold(24, |_| Self::waitlist_plan())
+            .note(
+                "Waitlist launch plan",
+                "You planned the waitlist launch: the beta studios, the help article and launch day.",
+                "Nothing notable.",
+            )]
     }
 
     /// Today's sessions as far as now: the one under way has no note, and a
@@ -1899,11 +2037,12 @@ pub fn week(now_us: u64, tz: i32) -> World {
     let story = Story { now_us, tz };
     let calendar = story.calendar();
     let mut days = Vec::new();
-    for back in (0..=6u64).rev() {
+    for back in (0..=OLDEST_DAY_BACK).rev() {
         let sessions = match back {
             0 => story.cut_at_now(story.today(&calendar)),
             1 => story.yesterday(),
-            _ => story.earlier(back),
+            2..=6 => story.earlier(back),
+            _ => story.older(back),
         };
         days.push(DayStory {
             back,

@@ -50,6 +50,8 @@
 // Identical structure to `SafariURLProvider` / `FirefoxURLProvider`:
 //
 // - `bundleId != "company.thebrowser.Browser"` → `nil`.
+// - The person's address switch off (`AutomationConsent.addressReadingKey`)
+//   → `nil`, before the cache or any AppleScript.
 // - Otherwise: run the Arc AppleScript via the supplied
 //   `AppleScriptRunner` (production wiring: `RealAppleScriptRunner`
 //   from `SafariURLProvider.swift`). On success non-empty → URL.
@@ -82,6 +84,11 @@ public final class ArcURLProvider: URLProvider, @unchecked Sendable {
 
     private let runner: AppleScriptRunner
     private let clock: @Sendable () -> Date
+    /// The person's own switch for saving addresses read through Automation
+    /// (`AutomationConsent.addressReadingKey`). Off, no script runs, even
+    /// where macOS already allows it: a yes given to Resume or setup never
+    /// turns address reading on.
+    private let readsAddresses: @Sendable () -> Bool
     private let lock = NSLock()
     private var cachedAt: Date?
     private var cachedValue: String?
@@ -91,9 +98,10 @@ public final class ArcURLProvider: URLProvider, @unchecked Sendable {
     private var cachedWindowId: UInt32?
 
     /// Production initializer. Wires the real `NSAppleScript`-backed
-    /// runner + the system clock.
+    /// runner, the system clock and the person's address switch.
     public convenience init() {
-        self.init(runner: RealAppleScriptRunner(), clock: { Date() })
+        self.init(runner: RealAppleScriptRunner(), clock: { Date() },
+                  readsAddresses: { AutomationConsent.readsAddressesNow() })
     }
 
     /// Test initializer. Internal so tests in the same module can
@@ -101,10 +109,12 @@ public final class ArcURLProvider: URLProvider, @unchecked Sendable {
     /// use the convenience init above.
     internal init(
         runner: AppleScriptRunner,
-        clock: @escaping @Sendable () -> Date
+        clock: @escaping @Sendable () -> Date,
+        readsAddresses: @escaping @Sendable () -> Bool = { true }
     ) {
         self.runner = runner
         self.clock = clock
+        self.readsAddresses = readsAddresses
     }
 
     public func activeTabURL(forFrontmost bundleId: String) -> String? {
@@ -115,7 +125,7 @@ public final class ArcURLProvider: URLProvider, @unchecked Sendable {
         forFrontmost bundleId: String,
         focusedWindowId: UInt32?
     ) -> String? {
-        guard bundleId == Self.bundleId else { return nil }
+        guard bundleId == Self.bundleId, readsAddresses() else { return nil }
 
         let now = clock()
 

@@ -142,12 +142,14 @@ struct EditorScreen {
         let left: CGFloat = 301
         let font = Face.mono(13.5)
         let cursor = meta["cursor_line"]?.int ?? 0
+        // The file's line at the top: the window may be scrolled.
+        let firstLine = meta["first_line"]?.int ?? 1
         let lineHeight: CGFloat = 21
         let lines = spec.mainLines
         for (index, line) in lines.enumerated() {
             let y = top + 8 + CGFloat(index) * lineHeight
             guard y + lineHeight < bottom - 10 else { break }
-            let number = index + 1
+            let number = firstLine + index
             if number == cursor {
                 c.fill(CGRect(x: left, y: y - 2, width: c.size.width - left - 100, height: lineHeight), hex(0x2A2D2E))
                 c.stroke(CGRect(x: left, y: y - 2, width: c.size.width - left - 100, height: lineHeight), 0, hex(0x282828))
@@ -165,7 +167,7 @@ struct EditorScreen {
             let indent = CGFloat(line.prefix { $0 == " " }.count) * 1.4
             let length = min(CGFloat(line.count) * 1.3, 70)
             c.fill(CGRect(x: mapLeft + indent, y: top + 6 + CGFloat(index) * 4, width: length - indent, height: 2),
-                   index + 1 == cursor ? hex(0x4B6FA5) : hex(0x505050))
+                   firstLine + index == cursor ? hex(0x4B6FA5) : hex(0x505050))
         }
         c.fill(CGRect(x: mapLeft - 4, y: top, width: 84, height: CGFloat(lines.count) * 4 + 12), hex(0xFFFFFF, alpha: 0.04))
     }

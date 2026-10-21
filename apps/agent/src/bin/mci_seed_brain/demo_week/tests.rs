@@ -1,19 +1,65 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 
-use sha2::Digest as _;
-
-use super::story::{FOUNDER, PEOPLE};
+use super::story::{FOUNDER, OLDEST_DAY_BACK, PEOPLE, PROJECT_FOLDER};
 use super::*;
 
-/// Names from the maintainer's own life that must never appear in the made-up
-/// world, kept as SHA-256 digests of the lowercased word so this public file
-/// doesn't list them.
-const PRIVATE_NAMES: [&str; 3] = [
-    "ed6c58a3009a2b91b6b1374e3745762de7370bf1e40c1a6e66140d2942769da4",
-    "cdf2e21fa04b3c5e4793783192eb1bebb4574064d2f43853535d7e765aa3e8c9",
-    "d6c8dec6ccdd9eb13bc4f47d18b0c0b2c57dd96dbe51e913fe2030c024749f04",
-];
+/// Names from the maintainers' own lives that must never appear in the
+/// made-up world. They are kept outside the repository, one per line, in
+/// this file under the home folder; the check runs only where it exists.
+/// The repository holds neither the names nor anything that leads to them.
+const PRIVATE_NAMES_FILE: &str = ".config/hippocampus-dev/private-names.txt";
+
+/// The private names list at `path`, lowercased: one name per line, blank
+/// lines and lines starting with `#` skipped. Empty when there is no file.
+fn private_names_at(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .map(|text| {
+            text.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_lowercase)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The list under this user's home folder, if there is one.
+fn private_names() -> Vec<String> {
+    std::env::var_os("HOME")
+        .map(|home| private_names_at(&PathBuf::from(home).join(PRIVATE_NAMES_FILE)))
+        .unwrap_or_default()
+}
+
+/// The words in `text`, lowercased: its runs of letters and digits.
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// Whether `text` holds `name`: its words, whole and in a row, whatever
+/// the case and whatever stands between them.
+fn holds_name(text: &str, name: &str) -> bool {
+    let name = words(name);
+    !name.is_empty()
+        && words(text)
+            .windows(name.len())
+            .any(|run| run == name.as_slice())
+}
+
+/// The first place in `fields` that holds a name from `names`: only where it
+/// is, never the name.
+fn place_of_a_private_name<'a>(
+    fields: &'a [(String, String)],
+    names: &[String],
+) -> Option<&'a str> {
+    fields
+        .iter()
+        .find(|(_, text)| names.iter().any(|name| holds_name(text, name)))
+        .map(|(place, _)| place.as_str())
+}
 
 /// Pacific daylight time.
 const TZ: i32 = -7 * 3600;
@@ -86,7 +132,7 @@ fn the_week_moves_with_the_clock() {
 }
 
 #[test]
-fn every_moment_is_in_the_last_week_and_none_after_now() {
+fn every_moment_is_in_its_days_and_none_after_now() {
     for now in [
         MONDAY_AFTERNOON,
         at_local(MONDAY_AFTERNOON, 8, 0),
@@ -98,10 +144,17 @@ fn every_moment_is_in_the_last_week_and_none_after_now() {
         let week = world(now, TZ);
         let moments = week.moments();
         assert!(moments.len() > 150, "a busy week: {}", moments.len());
-        let first = day_start(now, TZ, 6);
-        for (ts, _, _) in &moments {
-            assert!(*ts >= first, "inside the week");
+        let first = day_start(now, TZ, OLDEST_DAY_BACK);
+        let week = day_start(now, TZ, 6);
+        for (ts, win, _) in &moments {
+            assert!(*ts >= first, "inside the days the memory holds");
             assert!(*ts + 30_000_000 <= now, "never after now");
+            if *ts < week {
+                assert_eq!(
+                    win.title, "Waitlist launch plan",
+                    "before the week, only last week's project"
+                );
+            }
         }
         let times: Vec<u64> = moments.iter().map(|(ts, _, _)| *ts).collect();
         let mut sorted = times.clone();
@@ -258,22 +311,85 @@ fn a_screenshot_shows_the_same_window_wherever_it_is_used() {
     }
 }
 
+/// Every piece of text the week writes, with where it is.
+fn every_field(week: &World) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    for (index, (_, win, _)) in week.moments().into_iter().enumerate() {
+        fields.push((format!("moment {index}'s title"), win.title.clone()));
+        fields.push((
+            format!("moment {index}'s address"),
+            win.url.clone().unwrap_or_default(),
+        ));
+        fields.push((format!("moment {index}'s text"), win.main.clone()));
+        fields.push((format!("moment {index}'s window parts"), win.rest.clone()));
+        fields.push((format!("moment {index}'s caption"), win.caption.clone()));
+    }
+    fields.push(("the screen list".into(), week.screens().to_string()));
+    fields.push(("the calendar".into(), week.calendar_json().to_string()));
+    for (index, claim) in week.claims.iter().enumerate() {
+        fields.push((format!("line {index} about Ren"), claim.text.clone()));
+    }
+    fields
+}
+
+#[test]
+fn the_private_names_list_lives_outside_the_repository_and_never_says_a_name() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(
+        private_names_at(&dir.path().join("none.txt")).is_empty(),
+        "no file, no names: the check passes where there is no list"
+    );
+    let list = dir.path().join("private-names.txt");
+    std::fs::write(
+        &list,
+        "# made up for this test\n\nZebulon\n  Quillfeather Works \n",
+    )
+    .unwrap();
+    let names = private_names_at(&list);
+    assert_eq!(names, ["zebulon", "quillfeather works"]);
+    let fields = vec![
+        (
+            "moment 0's title".to_owned(),
+            "Zebulonia - Google Docs".to_owned(),
+        ),
+        (
+            "moment 1's caption".to_owned(),
+            "Writing to QUILLFEATHER works".to_owned(),
+        ),
+        (
+            "moment 2's text".to_owned(),
+            "Lunch with zebulon".to_owned(),
+        ),
+    ];
+    // A whole word or the words in a row; the place, never the name.
+    assert_eq!(
+        place_of_a_private_name(&fields, &names),
+        Some("moment 1's caption")
+    );
+    assert_eq!(place_of_a_private_name(&fields[..1], &names), None);
+    let wrapped = [(
+        "moment 3's text".to_owned(),
+        "Quillfeather\nworks".to_owned(),
+    )];
+    assert_eq!(
+        place_of_a_private_name(&wrapped, &names),
+        Some("moment 3's text")
+    );
+    assert!(PRIVATE_NAMES_FILE.starts_with(".config/"));
+}
+
 #[test]
 fn the_world_is_made_up() {
     let week = world(MONDAY_AFTERNOON, TZ);
-    let mut corpus = String::new();
-    for (_, win, _) in week.moments() {
-        let _ = writeln!(
-            corpus,
-            "{} {:?} {} {} {}",
-            win.title, win.url, win.main, win.rest, win.caption
-        );
-    }
-    corpus.push_str(&week.screens().to_string());
-    corpus.push_str(&week.calendar_json().to_string());
-    for claim in &week.claims {
-        corpus.push_str(&claim.text);
-    }
+    let fields = every_field(&week);
+    // The project's folder is inside Demo Memory's own folder, so Resume
+    // has a real folder to reopen: the one place the product's name shows.
+    let corpus = fields
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(PROJECT_FOLDER, "pebblewick-app");
     for never in [
         "Amy",
         "Jain",
@@ -291,15 +407,10 @@ fn the_world_is_made_up() {
     ] {
         assert!(!corpus.contains(never), "{never} is in the demo week");
     }
-    for word in corpus.split(|c: char| !c.is_alphanumeric()) {
-        let mut hex = String::with_capacity(64);
-        for byte in sha2::Sha256::digest(word.to_lowercase().as_bytes()) {
-            let _ = write!(hex, "{byte:02x}");
-        }
-        assert!(
-            !PRIVATE_NAMES.contains(&hex.as_str()),
-            "a private name is in the demo week"
-        );
+    // Names from the maintainers' own lives, from the list outside the
+    // repository where there is one. A failure says where, never the name.
+    if let Some(place) = place_of_a_private_name(&fields, &private_names()) {
+        panic!("a private name is in {place}");
     }
     // Addresses are the real products' or `.example` ones.
     for (_, win, _) in week.moments() {
@@ -333,7 +444,10 @@ fn the_world_is_made_up() {
 /// for `mci_brain::subject`, enough to check the story's ranking.
 fn item_of(win: &Win) -> Option<&'static str> {
     let title = win.title.as_str();
-    if title.ends_with("\u{2014} pebblewick-app") || title.starts_with("pebblewick-app \u{2014}") {
+    if title.ends_with("\u{2014} pebblewick-app")
+        || title.starts_with("pebblewick-app \u{2014}")
+        || title.starts_with(&format!("{PROJECT_FOLDER} \u{2014}"))
+    {
         Some("pebblewick-app")
     } else if title.starts_with("Q4 investor update") {
         Some("Q4 investor update")
@@ -345,6 +459,8 @@ fn item_of(win: &Win) -> Option<&'static str> {
         Some("October changelog")
     } else if title == "Hiring plan" {
         Some("Hiring plan")
+    } else if title == "Waitlist launch plan" {
+        Some("Waitlist launch plan")
     } else {
         None
     }
@@ -360,22 +476,27 @@ fn working_on_ranks_as_the_story_says_on_every_day_of_the_week() {
 
 fn ranks_as_the_story_says(now: u64) {
     let week = world(now, TZ);
-    let mut minutes: BTreeMap<&str, u64> = BTreeMap::new();
+    // Minutes in front this week (the last seven days of use, each of the
+    // week's days) and in all, as Working On counts them.
+    let mut this_week: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut in_all: BTreeMap<&str, u64> = BTreeMap::new();
     for day in &week.days {
         for session in &day.sessions {
             let mut at = session.start_us;
             for hold in &session.holds {
                 let held = hold.minutes.min(now.saturating_sub(at) / MIN);
                 if let Some(item) = item_of(&hold.win) {
-                    *minutes.entry(item).or_default() += held;
+                    *in_all.entry(item).or_default() += held;
+                    *this_week.entry(item).or_default() += if day.back <= 6 { held } else { 0 };
                 }
                 at += hold.minutes * MIN;
             }
         }
     }
-    let mut ranked: Vec<(&str, u64)> = minutes.into_iter().collect();
+    let mut ranked: Vec<(&str, u64)> = this_week.into_iter().collect();
     ranked.sort_by_key(|(_, minutes)| std::cmp::Reverse(*minutes));
     let names: Vec<&str> = ranked.iter().map(|(name, _)| *name).collect();
+    let when = Local::of(now, TZ).long_date();
     assert_eq!(
         names,
         [
@@ -384,15 +505,20 @@ fn ranks_as_the_story_says(now: u64) {
             "2027 budget",
             "Pricing page v2",
             "October changelog",
-            "Hiring plan"
+            "Hiring plan",
+            "Waitlist launch plan"
         ],
-        "{} {ranked:?}",
-        Local::of(now, TZ).long_date()
+        "{when} {ranked:?}"
     );
     assert!(
         ranked[..5].iter().all(|(_, m)| *m >= 30),
         "the five in the sidebar each have 30 minutes or more: {ranked:?}"
     );
+    // The hiring plan is too short to be an item; last week's waitlist plan
+    // is one, with nothing this week, so Show All lists it under Earlier.
+    assert!(in_all["Hiring plan"] < 30, "{when} {in_all:?}");
+    assert!(in_all["Waitlist launch plan"] >= 30, "{when} {in_all:?}");
+    assert_eq!(ranked[6], ("Waitlist launch plan", 0), "{when}");
 }
 
 #[test]
@@ -517,5 +643,140 @@ fn the_week_is_written_and_read_back() {
     assert!(
         queries.contains(&"stripe prorate monthly to yearly"),
         "{queries:?}"
+    );
+}
+
+#[test]
+fn the_terminal_shows_the_project_folder_demo_memory_makes() {
+    // Demo Memory's folder, as the app makes it (`DemoMemoryFolder.standard`),
+    // holds the project's folder, and a Terminal window names it, so Resume
+    // finds a folder to reopen instead of "doesn't know where it is".
+    assert_eq!(
+        PROJECT_FOLDER,
+        "~/Library/Application Support/Hippocampus/Demo Memory/pebblewick-app"
+    );
+    for now in [MONDAY_AFTERNOON, at_local(MONDAY_AFTERNOON, 21, 30)] {
+        let week = world(now, TZ);
+        let today = day_start(now, TZ, 0);
+        let mut named_before_today = false;
+        for (ts, win, _) in week.moments() {
+            if win.app != "com.apple.Terminal" {
+                continue;
+            }
+            let folder = mci_brain::subject::terminal_folder_at(&win.title, Some("sam"))
+                .expect("the title names a folder");
+            assert_eq!(folder.name, "pebblewick-app", "{}", win.title);
+            if let Some(path) = folder.path.as_deref() {
+                assert_eq!(path, PROJECT_FOLDER, "one folder, everywhere");
+                assert!(ts < today, "today's windows keep Terminal's own title");
+                named_before_today = true;
+            }
+            assert!(
+                !win.main.contains("/Users/"),
+                "no other folder: {}",
+                win.main
+            );
+        }
+        assert!(
+            named_before_today,
+            "a window the agent reads names the folder"
+        );
+    }
+}
+
+#[test]
+fn the_project_folder_is_made_only_inside_demo_memorys_own_folder() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = tempfile::tempdir().unwrap();
+    let demo = home
+        .path()
+        .join("Library/Application Support/Hippocampus/Demo Memory");
+    std::fs::create_dir_all(&demo).unwrap();
+    let made = make_project_folder(&demo, home.path()).unwrap();
+    let project = demo.join("pebblewick-app");
+    assert_eq!(made.as_deref(), Some(project.as_path()));
+    assert!(project.is_dir());
+    assert_eq!(
+        std::fs::metadata(&project).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert_eq!(std::fs::read_dir(&project).unwrap().count(), 0, "empty");
+    // Again: the folder is kept as it is.
+    assert_eq!(
+        make_project_folder(&demo, home.path()).unwrap().as_deref(),
+        Some(project.as_path())
+    );
+
+    // A store anywhere else makes nothing, in the home folder or beside it.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let other_home = tempfile::tempdir().unwrap();
+    assert_eq!(
+        make_project_folder(elsewhere.path(), other_home.path()).unwrap(),
+        None
+    );
+    assert_eq!(
+        std::fs::read_dir(other_home.path()).unwrap().count(),
+        0,
+        "nothing made in a home whose Demo Memory isn't the store's folder"
+    );
+    assert_eq!(std::fs::read_dir(elsewhere.path()).unwrap().count(), 0);
+
+    // Something that isn't a folder at its place is never touched.
+    let third = tempfile::tempdir().unwrap();
+    let demo = third
+        .path()
+        .join("Library/Application Support/Hippocampus/Demo Memory");
+    std::fs::create_dir_all(&demo).unwrap();
+    std::fs::write(demo.join("pebblewick-app"), b"kept").unwrap();
+    assert!(make_project_folder(&demo, third.path()).is_err());
+    assert_eq!(std::fs::read(demo.join("pebblewick-app")).unwrap(), b"kept");
+}
+
+#[test]
+fn the_code_moments_read_the_part_of_the_file_on_screen() {
+    // History's rows lead with what each moment read: billing.ts reads
+    // differently as the day moves through the file.
+    let week = world(at_local(MONDAY_AFTERNOON, 21, 30), TZ);
+    let mut first_lines: HashMap<String, String> = HashMap::new();
+    for (_, win, _) in week.moments() {
+        if win.app != "com.microsoft.VSCode" {
+            continue;
+        }
+        let screen = win.screen.as_ref().unwrap();
+        assert!(
+            win.main.lines().count() <= 36,
+            "{} fits the window",
+            screen.id
+        );
+        let first = screen.meta["first_line"].as_u64().unwrap();
+        let cursor = screen.meta["cursor_line"].as_u64().unwrap();
+        let shown = u64::try_from(win.main.lines().count()).unwrap();
+        assert!(
+            first <= cursor && cursor < first + shown,
+            "{}: the cursor is on screen",
+            screen.id
+        );
+        assert!(
+            win.rest.contains(&format!("Ln {cursor},")),
+            "{}: the status bar says the cursor's line",
+            screen.id
+        );
+        if win.title.starts_with("billing.ts ") {
+            first_lines.insert(
+                screen.id.clone(),
+                win.main.lines().next().unwrap().to_owned(),
+            );
+        }
+    }
+    let distinct: HashSet<&String> = first_lines.values().collect();
+    assert_eq!(first_lines.len(), 3, "{first_lines:?}");
+    assert_eq!(
+        distinct.len(),
+        3,
+        "each place in billing.ts reads differently"
+    );
+    assert_eq!(
+        first_lines["code-billing-ts-credit"],
+        "// The credit for the days left this month, in cents."
     );
 }

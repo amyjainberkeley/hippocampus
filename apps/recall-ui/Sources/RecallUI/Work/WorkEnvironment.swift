@@ -76,7 +76,7 @@ extension EnvironmentValues {
 
 /// No browser can say its tabs.
 struct NoOpenTabs: OpenTabsReading {
-    func openTabs(browser: String, mayAsk: Bool) async -> [String]? { nil }
+    func openTabs(browser: String, mayAsk: Bool) async -> OpenTabsAnswer { .unknown }
 }
 
 /// Forgetting what a lens lists: a page's moments on every day, a search

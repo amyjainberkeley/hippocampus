@@ -880,6 +880,49 @@ fn evidence(all: &[Kept], item: &Claim) -> Vec<i64> {
     out
 }
 
+/// The made-up project's folder: an empty folder inside `folder`, the one
+/// that holds Demo Memory's store, where the week's Terminal says the
+/// project is ([`story::PROJECT_FOLDER`], with `~` for `home`). Resume then
+/// finds a folder to reopen, and it goes when Demo Memory's folder does.
+///
+/// It is made only when `folder` is that folder, Demo Memory's own in
+/// `home`; anywhere else nothing is made and the answer is `None`. A folder
+/// already there is kept; anything else at its place is never touched.
+///
+/// # Errors
+/// Something that isn't a folder is at its place, or it can't be made.
+pub fn make_project_folder(
+    folder: &std::path::Path,
+    home: &std::path::Path,
+) -> std::io::Result<Option<std::path::PathBuf>> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    let Some(rest) = story::PROJECT_FOLDER.strip_prefix("~/") else {
+        return Ok(None);
+    };
+    let project = home.join(rest);
+    let inside = project
+        .parent()
+        .and_then(|parent| parent.canonicalize().ok())
+        .zip(folder.canonicalize().ok())
+        .is_some_and(|(parent, folder)| parent == folder);
+    if !inside {
+        return Ok(None);
+    }
+    match std::fs::symlink_metadata(&project) {
+        Ok(meta) if meta.is_dir() => return Ok(Some(project)),
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "something that isn't a folder is where the project's folder goes",
+            ))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    std::fs::DirBuilder::new().mode(0o700).create(&project)?;
+    Ok(Some(project))
+}
+
 /// What [`seed`] needs to find in an empty store before it writes, so a
 /// person's own memory is never written into.
 ///

@@ -88,9 +88,7 @@ struct LookedUpList: View {
                         WorkEmptyState(symbol: "text.magnifyingglass", title: WorkCopy.lookedUpEmptyTitle,
                                        message: WorkCopy.lookedUpEmptyBody, actionTitle: WorkCopy.addBrowserExtension) {
                             guard !isSyntheticPreview else { return }
-                            Task {
-                                _ = await WorkspacePreferencesRouter.shared.open(.sources, bundleURL: Bundle.main.bundleURL)
-                            }
+                            BrowserExtensionSetup.open()
                         }
                     } else {
                         ForEach(model.sections, id: \.title) { section in

@@ -52,53 +52,108 @@ public struct SystemResumeWorkspace: ResumeWorkspace {
     }
 }
 
-/// The addresses open in Safari's and the Chrome family's tabs, through
+/// The addresses open in the Chrome family's and Arc's tabs, through
 /// AppleScript, only while that browser is running and only as far as macOS
 /// allows (SPEC-DELTA 3). It asks for Automation only when told it may (the
-/// first Resume that opens tabs in that browser); otherwise a browser
-/// Hippocampus may not ask answers nil and its tabs open again. Addresses
-/// are compared and dropped; nothing is kept.
+/// first Resume that opens tabs in that browser while it is running), and
+/// says whether macOS was asked; otherwise a browser Hippocampus may not ask
+/// can't tell and its tabs open again. Addresses are compared and dropped;
+/// nothing is kept.
+///
+/// Private windows are never read (SPEC-DELTA 3, PRIVACY.md): each script
+/// asks only for the tabs of normal windows. Safari can't tell a script
+/// which of its windows are private, so its tabs are never listed and open
+/// again.
 public actor AppleScriptOpenTabs: OpenTabsReading {
     public static let shared = AppleScriptOpenTabs()
 
-    /// Browsers whose tabs AppleScript can list.
-    public static let browsers: Set<String> = [
-        "com.apple.Safari", "com.apple.SafariTechnologyPreview",
+    /// The Chrome family: each window has a `mode`, "normal" or "incognito".
+    static let chromium: Set<String> = [
         "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
-        "org.chromium.Chromium", "com.brave.Browser", "com.microsoft.edgemac", "company.thebrowser.Browser",
-        "com.vivaldi.Vivaldi",
+        "org.chromium.Chromium", "com.brave.Browser", "com.microsoft.edgemac", "com.vivaldi.Vivaldi",
     ]
+
+    /// Arc: each window says whether it is `incognito`.
+    static let arc = "company.thebrowser.Browser"
+
+    /// Browsers whose normal windows' tabs AppleScript can list.
+    public static var browsers: Set<String> { chromium.union([arc]) }
 
     public init() {}
 
-    public func openTabs(browser: String, mayAsk: Bool) async -> [String]? {
-        guard Self.browsers.contains(browser) else { return nil }
+    public func openTabs(browser: String, mayAsk: Bool) async -> OpenTabsAnswer {
+        guard let source = Self.script(for: browser) else { return .unknown }
         let running = await MainActor.run {
             !NSRunningApplication.runningApplications(withBundleIdentifier: browser).isEmpty
         }
-        guard running else { return [] }
+        // A browser that isn't running can't be asked about: macOS answers
+        // without asking, so the one question waits for a Resume that finds
+        // it open.
+        guard running else { return .notRunning }
         // Asking may wait for the person's answer: never on the main thread.
-        let allowed = await Task.detached(priority: .userInitiated) {
-            Self.mayAutomate(browser, ask: mayAsk)
+        let permission = await Task.detached(priority: .userInitiated) {
+            Self.permission(browser, ask: mayAsk)
         }.value
-        guard allowed else { return nil }
-        return await Task.detached(priority: .userInitiated) {
-            Self.tabAddresses(browser)
-        }.value
+        switch permission {
+        case .notRunning:
+            return .notRunning
+        case .refused:
+            return OpenTabsAnswer(addresses: nil, asked: mayAsk)
+        case .allowed:
+            let addresses = await Task.detached(priority: .userInitiated) {
+                Self.tabAddresses(source)
+            }.value
+            return OpenTabsAnswer(addresses: addresses, asked: mayAsk)
+        }
+    }
+
+    /// What macOS says about this app sending a browser Apple Events.
+    enum Permission: Equatable {
+        case allowed
+        case refused
+        /// The browser quit before macOS could ask: nothing was asked.
+        case notRunning
+    }
+
+    /// The script that lists the addresses in `browser`'s normal windows,
+    /// or nil when its private windows can't be left out (Safari) or it has
+    /// no tabs to list. Built only from the fixed lists above, never from
+    /// anything read.
+    nonisolated static func script(for browser: String) -> String? {
+        let windows: String
+        if chromium.contains(browser) {
+            windows = "every window whose mode is \"normal\""
+        } else if browser == arc {
+            windows = "every window whose incognito is false"
+        } else {
+            return nil
+        }
+        return "tell application id \"\(browser)\" to get URL of every tab of (\(windows))"
     }
 
     /// Whether this app may send `browser` Apple Events, asking the person
     /// only when `ask`.
-    nonisolated static func mayAutomate(_ browser: String, ask: Bool) -> Bool {
+    nonisolated static func permission(_ browser: String, ask: Bool) -> Permission {
         let target = NSAppleEventDescriptor(bundleIdentifier: browser)
-        guard var address = target.aeDesc?.pointee else { return false }
-        let status = AEDeterminePermissionToAutomateTarget(&address, typeWildCard, typeWildCard, ask)
-        return status == noErr
+        // The address points into `target`: keep it alive while macOS reads it.
+        return withExtendedLifetime(target) {
+            guard var address = target.aeDesc?.pointee else { return .refused }
+            return permission(status: AEDeterminePermissionToAutomateTarget(&address, typeWildCard, typeWildCard, ask))
+        }
     }
 
-    /// Every tab's address in every window, or nil when the script fails.
-    nonisolated static func tabAddresses(_ browser: String) -> [String]? {
-        let source = "tell application id \"\(browser)\" to get URL of every tab of every window"
+    /// What macOS's answer means: allowed, the browser gone (nothing was
+    /// asked), or anything else, which Resume treats as not allowed.
+    nonisolated static func permission(status: OSStatus) -> Permission {
+        switch status {
+        case OSStatus(noErr): .allowed
+        case OSStatus(procNotFound): .notRunning
+        default: .refused
+        }
+    }
+
+    /// The addresses `source` lists, or nil when the script fails.
+    nonisolated static func tabAddresses(_ source: String) -> [String]? {
         guard let script = NSAppleScript(source: source) else { return nil }
         var error: NSDictionary?
         let result = script.executeAndReturnError(&error)
@@ -119,8 +174,9 @@ public actor AppleScriptOpenTabs: OpenTabsReading {
 }
 
 public extension ResumeRules {
-    /// The rules in the app: the apps and sites Hippocampus never reads,
-    /// and the person's own never-read list, read once when the sheet opens.
+    /// The rules in the app: the apps, sites and private windows' titles
+    /// Hippocampus never reads, and the person's own never-read list (apps,
+    /// addresses and parts of titles), read once when the sheet opens.
     static func system(
         userList: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("MCI").appendingPathComponent("denylist.toml")
@@ -131,7 +187,8 @@ public extension ResumeRules {
         let denylist = SensitiveCaptureDenylist(entries: entries)
         return ResumeRules(
             isNeverReadApp: { denylist.appIsDenied(bundleId: $0) },
-            isNeverReadSite: { denylist.urlIsDenied($0) }
+            isNeverReadSite: { denylist.urlIsDenied($0) },
+            isNeverReadTitle: { denylist.windowTitleIsDenied($0) }
         )
     }
 }

@@ -706,6 +706,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in
                     _ = supervisor.openOnboarding()
                 }
+            case .showSetupPanel(let panel):
+                // The window's Add Browser Extension… (SPEC 3.5): setup's own
+                // panel, which opens the flow until setup is done.
+                Task { @MainActor in
+                    _ = supervisor.openOnboarding(initialStep: panel.rawValue)
+                }
             case .ask(let question):
                 // A link always shows Ask, and asks when it carries a
                 // question (RULINGS S12).

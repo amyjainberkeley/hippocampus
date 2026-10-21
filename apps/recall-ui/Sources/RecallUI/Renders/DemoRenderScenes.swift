@@ -286,7 +286,11 @@ final class DemoRenderWorld {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("hippocampus-demo-memory-render-\(UUID().uuidString)", isDirectory: true)
         let home = folder.appendingPathComponent("home", isDirectory: true)
-        let store = folder.appendingPathComponent("Demo Memory", isDirectory: true)
+        // Where the app keeps Demo Memory in a home folder, so the made-up
+        // project's folder the seeder makes inside it is the one the week's
+        // Terminal names, and Resume finds it.
+        let store = home.appendingPathComponent("Library/Application Support/Hippocampus/Demo Memory",
+                                                isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
