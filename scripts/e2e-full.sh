@@ -1290,6 +1290,8 @@ FRAMES
     product_env "${NO_MODEL[@]}" "$FEED" "${AFTER_ERASE_ARGS[@]}" 2> "$H/feed-after-erase.stderr" \
         | product_env "${NO_MODEL[@]}" "$AGENT" --drain-stdin --strict --db-path "$DB" \
             > "$H/agent-after-erase.stdout" 2> "$H/agent-after-erase.stderr"
+    product_env "${NO_MODEL[@]}" "$AGENT" enrich --db-path "$DB" --batch-size 32 \
+        > "$H/enrich-after-erase.stdout" 2> "$H/enrich-after-erase.stderr"
     product_env "$PROBE" history 200 > "$H/history-after-erase.json" 2> "$H/history-after-erase.stderr"
     after_erase="$(python3 - "$H/history-after-erase.json" <<'PY'
 import json, sys
