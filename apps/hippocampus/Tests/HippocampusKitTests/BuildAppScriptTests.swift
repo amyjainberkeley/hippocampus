@@ -127,6 +127,7 @@ final class BuildAppScriptTests: XCTestCase {
             "apps/hippocampus/Package.resolved",
             "apps/hippocampus/Resources/Hippocampus.entitlements",
             "apps/hippocampus/Resources/MCICaptureHelper.entitlements",
+            "apps/hippocampus/Resources/RecallUI.entitlements",
             "apps/hippocampus/Sources/HippocampusKit/Resources/keychain-sharing-contract.json",
             "extensions/safari/appex/HippocampusSafariExtension.entitlements",
         ]
