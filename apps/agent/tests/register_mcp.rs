@@ -72,11 +72,14 @@ fn register_mcp_writes_to_claude_json_not_settings_json() {
 }
 
 // -----------------------------------------------------------------------
-// Fix 2: register-mcp includes env block when dev.key exists
+// Fix 2: the brain key stays out of ~/.claude.json when dev.key has it
 // -----------------------------------------------------------------------
 
+/// `mcp-serve` falls back to `dev.key` by itself (see the Fix 3 tests), so
+/// copying the key into `~/.claude.json` only spread it to a file that is
+/// usually world-readable and gets synced and shared.
 #[test]
-fn register_mcp_includes_env_block_when_dev_key_exists() {
+fn register_mcp_leaves_the_key_out_when_dev_key_exists() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path();
 
@@ -94,15 +97,111 @@ fn register_mcp_includes_env_block_when_dev_key_exists() {
 
     assert!(output.status.success());
 
+    let raw = std::fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(
+        !raw.contains(&key_hex),
+        "the brain key must not appear anywhere in ~/.claude.json"
+    );
+    let content: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let env = &content["mcpServers"]["hippocampus"]["env"];
+    assert!(env.get("MCI_DB_KEY_HEX").is_none());
+    assert!(
+        env.get("MCI_DB_PATH").is_some(),
+        "the brain path must still be recorded"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("brain key not yet generated"),
+        "a key exists, so there is nothing to warn about, got: {stderr}"
+    );
+}
+
+/// An exported key that differs from `dev.key` is the one the user means,
+/// and `mcp-serve` would pick the wrong one without it.
+#[test]
+fn register_mcp_records_an_env_key_that_dev_key_cannot_supply() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+
+    let key_dir = home.join("Library/Application Support/MCI");
+    std::fs::create_dir_all(&key_dir).unwrap();
+    std::fs::write(key_dir.join("dev.key"), "a".repeat(64)).unwrap();
+    let env_key = "e".repeat(64);
+
+    let output = Command::new(agent_bin())
+        .arg("register-mcp")
+        .env("HOME", home)
+        .env("MCI_DB_KEY_HEX", &env_key)
+        .output()
+        .expect("spawn mci-agent");
+    assert!(output.status.success());
+
     let content: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
-    let hippo = &content["mcpServers"]["hippocampus"];
-    let env = hippo
-        .get("env")
-        .expect("env block should be present when dev.key exists");
     assert_eq!(
-        env.get("MCI_DB_KEY_HEX").and_then(|v| v.as_str()),
-        Some(key_hex.as_str())
+        content["mcpServers"]["hippocampus"]["env"]["MCI_DB_KEY_HEX"].as_str(),
+        Some(env_key.as_str())
+    );
+}
+
+/// A pre-existing `~/.claude.json` is commonly 0644. Recording a key in it
+/// must not leave the key readable by other users.
+#[test]
+fn register_mcp_tightens_the_file_when_it_records_a_key() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+    let settings = home.join(".claude.json");
+    std::fs::write(&settings, r#"{"mcpServers":{}}"#).unwrap();
+    std::fs::set_permissions(&settings, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let output = Command::new(agent_bin())
+        .arg("register-mcp")
+        .env("HOME", home)
+        .env("MCI_DB_KEY_HEX", "f".repeat(64))
+        .output()
+        .expect("spawn mci-agent");
+    assert!(output.status.success());
+
+    let mode = std::fs::metadata(&settings).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "a file holding the key must be 0600, got {mode:o}"
+    );
+}
+
+/// Earlier builds wrote the key even when `dev.key` held it. Re-running
+/// registration (or `init`) is how an existing install gets it removed.
+#[test]
+fn register_mcp_removes_a_key_an_earlier_build_recorded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path();
+
+    let key_dir = home.join("Library/Application Support/MCI");
+    std::fs::create_dir_all(&key_dir).unwrap();
+    let key_hex = "c".repeat(64);
+    std::fs::write(key_dir.join("dev.key"), &key_hex).unwrap();
+    std::fs::write(
+        home.join(".claude.json"),
+        format!(
+            r#"{{"mcpServers":{{"hippocampus":{{"type":"stdio","command":"/old/mci-agent","args":["mcp-serve"],"env":{{"MCI_DB_KEY_HEX":"{key_hex}"}}}}}}}}"#
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(agent_bin())
+        .arg("register-mcp")
+        .env("HOME", home)
+        .env_remove("MCI_DB_KEY_HEX")
+        .output()
+        .expect("spawn mci-agent");
+    assert!(output.status.success());
+
+    let raw = std::fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(
+        !raw.contains(&key_hex),
+        "re-registering must remove the previously recorded key"
     );
 }
 
@@ -349,7 +448,7 @@ fn drain_stdin_no_strict_prints_loud_warning_and_continues() {
     );
 }
 
-/// `~/.claude.json` carries the brain key, so a user tightening it to 0600
+/// `~/.claude.json` can carry the brain key, so a user tightening it to 0600
 /// is doing the right thing. Writing through a temp file and renaming would
 /// silently hand the destination the temp file's umask-derived mode and
 /// widen it back to world-readable.
@@ -378,7 +477,7 @@ fn register_mcp_preserves_a_tightened_file_mode() {
     );
 }
 
-/// Creating the file for the first time: we are writing a key into it, so
+/// Creating the file for the first time: it may carry a key later, so
 /// it should not start out world-readable either.
 #[test]
 fn register_mcp_creates_the_file_private() {
